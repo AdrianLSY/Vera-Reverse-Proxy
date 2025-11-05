@@ -4,3 +4,6 @@
 [submodule "Py-Service"]
 	path = Py-Service
 	url = git@github.com:AdrianLSY/Vera-Py-Service
+[submodule "Telephone"]
+	path = Telephone
+	url = https://github.com/AdrianLSY/Vera-Telephone
