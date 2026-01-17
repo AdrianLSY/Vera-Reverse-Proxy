@@ -149,7 +149,6 @@ For detailed setup, configuration, and deployment instructions, see:
 ### Additional Resources
 
 * **[Plugboard/AGENTS.md](Plugboard/AGENTS.md)** - Development conventions and Phoenix guidelines
-* **[Plugboard/TESTING_GUIDELINES.md](Plugboard/TESTING_GUIDELINES.md)** - Testing strategy and patterns
 * **[Plugboard/FUTURE_WORK.md](Plugboard/FUTURE_WORK.md)** - Roadmap and planned features
 * **[Plugboard/CONTRIBUTING.md](Plugboard/CONTRIBUTING.md)** - Contribution workflow and standards
 
