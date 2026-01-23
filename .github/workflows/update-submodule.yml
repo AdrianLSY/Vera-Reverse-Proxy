@@ -1,0 +1,128 @@
+name: Update Submodule Reference
+
+on:
+  repository_dispatch:
+    types: [submodule-updated]
+
+# Prevent concurrent runs to avoid race conditions when multiple submodules update
+concurrency:
+  group: update-submodules
+  cancel-in-progress: false
+
+jobs:
+  update-submodule:
+    name: Update ${{ github.event.client_payload.submodule }} reference
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate payload
+        run: |
+          if [[ -z "${{ github.event.client_payload.submodule }}" ]]; then
+            echo "Error: submodule name not provided in payload"
+            exit 1
+          fi
+
+          echo "Updating submodule: ${{ github.event.client_payload.submodule }}"
+          echo "Triggered by commit: ${{ github.event.client_payload.sha }}"
+
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.VERA_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.VERA_AUTOMATION_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout parent repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          submodules: true
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "vera-automation[bot]"
+          git config user.email "2716121+vera-automation[bot]@users.noreply.github.com"
+
+      - name: Update submodule to latest main
+        id: update
+        run: |
+          SUBMODULE="${{ github.event.client_payload.submodule }}"
+
+          # Validate submodule exists
+          if [ ! -d "$SUBMODULE" ]; then
+            echo "::error::Submodule directory '$SUBMODULE' does not exist"
+            exit 1
+          fi
+
+          # Navigate to submodule and fetch latest
+          cd "$SUBMODULE"
+          git fetch origin main
+          git checkout origin/main
+
+          # Get the new commit SHA
+          NEW_SHA=$(git rev-parse HEAD)
+          echo "New submodule SHA: $NEW_SHA"
+
+          # Return to parent and stage the update
+          cd ..
+          git add "$SUBMODULE"
+
+          # Check if there are changes to commit
+          if git diff --cached --quiet; then
+            echo "Submodule $SUBMODULE is already at the latest commit"
+            echo "submodule_updated=false" >> $GITHUB_OUTPUT
+          else
+            echo "submodule_updated=true" >> $GITHUB_OUTPUT
+            echo "new_sha=$NEW_SHA" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push
+        id: commit
+        if: steps.update.outputs.submodule_updated == 'true'
+        run: |
+          SUBMODULE="${{ github.event.client_payload.submodule }}"
+          SHORT_SHA="${{ github.event.client_payload.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+
+          git commit -m "chore: update $SUBMODULE to ${SHORT_SHA}
+
+          Automatic update triggered by push to $SUBMODULE main branch.
+
+          Submodule commit: ${{ github.event.client_payload.sha }}
+          Triggered by: ${{ github.event.client_payload.actor }}"
+
+          # Push with retry logic and exponential backoff
+          MAX_RETRIES=5
+          RETRY_DELAY=2
+          PUSH_SUCCESS=false
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Push attempt $i of $MAX_RETRIES..."
+            if git push origin main; then
+              echo "Successfully pushed update"
+              PUSH_SUCCESS=true
+              break
+            else
+              echo "Push failed"
+              if [ $i -lt $MAX_RETRIES ]; then
+                echo "Pulling and retrying in ${RETRY_DELAY}s..."
+                sleep $RETRY_DELAY
+                if ! git pull --rebase origin main; then
+                  echo "::error::Rebase failed, aborting"
+                  git rebase --abort 2>/dev/null || true
+                  exit 1
+                fi
+                RETRY_DELAY=$((RETRY_DELAY * 2))
+              fi
+            fi
+          done
+
+          if [ "$PUSH_SUCCESS" = "false" ]; then
+            echo "::error::Failed to push after $MAX_RETRIES attempts"
+            exit 1
+          fi
+
+          echo "push_success=true" >> $GITHUB_OUTPUT
+          echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
